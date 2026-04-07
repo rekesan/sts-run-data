@@ -184,10 +184,19 @@ card_win_counts = defaultdict(int)  # NEW
 # ================================
 # Extract card choices (per run)
 # ================================
-def extract_card_choices(obj, run_win):
+def extract_card_choices(obj, run_win, in_shop=False):
     if isinstance(obj, dict):
+
+        # Check if THIS node is a shop
+        current_in_shop = in_shop or (obj.get("map_point_type") == "shop")
+
         for key, value in obj.items():
             if key == "card_choices":
+                
+                # 🚫 Skip card choices if we're in a shop
+                if current_in_shop:
+                    continue
+
                 for choice in value:
                     card_name = clean_card_name(choice["card"]["id"])
 
@@ -201,12 +210,14 @@ def extract_card_choices(obj, run_win):
                         # Count wins when picked
                         if run_win:
                             card_win_counts[card_name] += 1
+
             else:
-                extract_card_choices(value, run_win)
+                # Recurse with updated shop context
+                extract_card_choices(value, run_win, current_in_shop)
 
     elif isinstance(obj, list):
         for item in obj:
-            extract_card_choices(item, run_win)
+            extract_card_choices(item, run_win, in_shop)
 # ================================
 # Iterate files
 # ================================
