@@ -35,6 +35,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
   const [activeTab, setActiveTab] = useState<TabKey>("progress");
   const [selectedCharacter, setSelectedCharacter] = useState("all");
   const [selectedAscension, setSelectedAscension] = useState("all");
+  const [selectedMode, setSelectedMode] = useState("all");
   const [minCount, setMinCount] = useState(5);
   const [excludeAbandoned, setExcludeAbandoned] = useState(true);
 
@@ -52,9 +53,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
       if (excludeAbandoned && run.wasAbandoned) return false;
       if (selectedCharacter !== "all" && run.character !== selectedCharacter) return false;
       if (selectedAscension !== "all" && run.ascension !== Number(selectedAscension)) return false;
+      if (selectedMode === "solo" && run.playerCount !== 1) return false;
+      if (selectedMode === "multi" && run.playerCount === 1) return false;
       return true;
     });
-  }, [data.runs, selectedCharacter, selectedAscension, excludeAbandoned]);
+  }, [data.runs, selectedCharacter, selectedAscension, selectedMode, excludeAbandoned]);
 
   // Compute all stats from filtered runs
   const relicResult = useMemo(() => computeRelicStats(filteredRuns, minCount), [filteredRuns, minCount]);
@@ -139,9 +142,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
           ascensionLevels={data.ascensionLevels}
           selectedCharacter={selectedCharacter}
           selectedAscension={selectedAscension}
+          selectedMode={selectedMode}
           minCount={minCount}
           onCharacterChange={setSelectedCharacter}
           onAscensionChange={setSelectedAscension}
+          onModeChange={setSelectedMode}
           onMinCountChange={setMinCount}
         />
         {abandonedCount > 0 && (

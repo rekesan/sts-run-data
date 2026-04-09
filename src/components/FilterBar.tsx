@@ -6,9 +6,11 @@ interface FilterBarProps {
   ascensionLevels: number[];
   selectedCharacter: string;
   selectedAscension: string;
+  selectedMode: string;
   minCount: number;
   onCharacterChange: (value: string) => void;
   onAscensionChange: (value: string) => void;
+  onModeChange: (value: string) => void;
   onMinCountChange: (value: number) => void;
 }
 
@@ -17,9 +19,11 @@ export const FilterBar: React.FC<FilterBarProps> = ({
   ascensionLevels,
   selectedCharacter,
   selectedAscension,
+  selectedMode,
   minCount,
   onCharacterChange,
   onAscensionChange,
+  onModeChange,
   onMinCountChange,
 }) => {
   return (
@@ -58,6 +62,19 @@ export const FilterBar: React.FC<FilterBarProps> = ({
               A{a}
             </option>
           ))}
+        </select>
+      </div>
+
+      <div className="filter-group">
+        <label htmlFor="mode-filter">Mode</label>
+        <select
+          id="mode-filter"
+          value={selectedMode}
+          onChange={(e) => onModeChange(e.target.value)}
+        >
+          <option value="all">All Modes</option>
+          <option value="solo">Solo Only</option>
+          <option value="multi">Multiplayer Only</option>
         </select>
       </div>
 
