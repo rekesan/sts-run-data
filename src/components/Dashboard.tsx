@@ -11,6 +11,7 @@ import {
   computeCardOpStats,
   computePotionStats,
   computeCombatTurnsStats,
+  computeMultiplayerStats,
 } from "../utils/statsEngine";
 import { Activity, Trophy, TrendingUp, TrendingDown, Ghost } from "lucide-react";
 import { FilterBar } from "./FilterBar";
@@ -21,13 +22,14 @@ import { BossPanel } from "./BossPanel";
 import { DeathPanel } from "./DeathPanel";
 import { ProgressPanel } from "./ProgressPanel";
 import { StrategyPanel } from "./StrategyPanel";
+import { MultiplayerPanel } from "./MultiplayerPanel";
 
 interface DashboardProps {
   data: AnalysisResult;
   onReset: () => void;
 }
 
-type TabKey = "relics" | "cards" | "runs" | "bosses" | "deaths" | "progress" | "strategy";
+type TabKey = "relics" | "cards" | "runs" | "bosses" | "deaths" | "progress" | "strategy" | "multiplayer";
 
 export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
   const [activeTab, setActiveTab] = useState<TabKey>("progress");
@@ -66,6 +68,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
   const removalResult = useMemo(() => computeCardOpStats(filteredRuns, "remove"), [filteredRuns]);
   const potionResult = useMemo(() => computePotionStats(filteredRuns), [filteredRuns]);
   const combatTurns = useMemo(() => computeCombatTurnsStats(filteredRuns), [filteredRuns]);
+  const multiplayerResult = useMemo(() => computeMultiplayerStats(filteredRuns), [filteredRuns]);
 
   // Overview
   const totalFiltered = filteredRuns.length;
@@ -80,6 +83,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
     { key: "cards", label: "Cards" },
     { key: "strategy", label: "Strategy" },
     { key: "bosses", label: "Bosses" },
+    { key: "multiplayer", label: "Co-op" },
     { key: "runs", label: "Runs" },
   ];
 
@@ -212,6 +216,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ data, onReset }) => {
           bossCharacterStats={bossResult.bossCharacterStats}
           hasBossData={bossResult.hasBossData}
         />
+      )}
+
+      {activeTab === "multiplayer" && (
+        <MultiplayerPanel stats={multiplayerResult} />
       )}
 
       {activeTab === "runs" && <RunsPanel runs={filteredRuns} />}

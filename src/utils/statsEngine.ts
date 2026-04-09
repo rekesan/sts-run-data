@@ -501,3 +501,126 @@ export function computeDeckStats(runs: RunData[]) {
     hasDeckData: withDecks.length > 0,
   };
 }
+
+// ─── Multiplayer Stats ──────────────────────────────────────────────
+
+export interface PlayerCountStats {
+  playerCount: number;
+  runs: number;
+  wins: number;
+  winRate: number;
+  avgRunTime: number;
+}
+
+export interface TeamCompStats {
+  teamComp: string;
+  playerCount: number;
+  runs: number;
+  wins: number;
+  winRate: number;
+}
+
+export interface CharacterPopularity {
+  character: string;
+  appearances: number;
+  wins: number;
+  winRate: number;
+}
+
+export interface ComputedMultiplayerStats {
+  multiplayerRuns: number;
+  soloRuns: number;
+  playerCountStats: PlayerCountStats[];
+  teamCompStats: TeamCompStats[];
+  characterPopularity: CharacterPopularity[];
+  hasMultiplayerData: boolean;
+}
+
+export function computeMultiplayerStats(runs: RunData[]): ComputedMultiplayerStats {
+  const multiRuns = runs.filter((r) => r.playerCount > 1);
+  const soloRuns = runs.filter((r) => r.playerCount === 1);
+
+  // By player count
+  const countMap = new Map<number, { runs: number; wins: number; totalTime: number }>();
+  for (const run of runs) {
+    if (!countMap.has(run.playerCount)) countMap.set(run.playerCount, { runs: 0, wins: 0, totalTime: 0 });
+    const s = countMap.get(run.playerCount)!;
+    s.runs++;
+    if (run.win) s.wins++;
+    s.totalTime += run.runTime;
+  }
+
+  const playerCountStats: PlayerCountStats[] = [];
+  countMap.forEach((s, pc) => {
+    playerCountStats.push({
+      playerCount: pc,
+      runs: s.runs,
+      wins: s.wins,
+      winRate: s.runs > 0 ? s.wins / s.runs : 0,
+      avgRunTime: s.runs > 0 ? s.totalTime / s.runs : 0,
+    });
+  });
+  playerCountStats.sort((a, b) => a.playerCount - b.playerCount);
+
+  // Team compositions
+  const compMap = new Map<string, { runs: number; wins: number; playerCount: number }>();
+  for (const run of multiRuns) {
+    if (!compMap.has(run.teamComp)) compMap.set(run.teamComp, { runs: 0, wins: 0, playerCount: run.playerCount });
+    const s = compMap.get(run.teamComp)!;
+    s.runs++;
+    if (run.win) s.wins++;
+  }
+
+  const teamCompStats: TeamCompStats[] = [];
+  compMap.forEach((s, comp) => {
+    teamCompStats.push({
+      teamComp: comp,
+      playerCount: s.playerCount,
+      runs: s.runs,
+      wins: s.wins,
+      winRate: s.runs > 0 ? s.wins / s.runs : 0,
+    });
+  });
+  teamCompStats.sort((a, b) => b.runs - a.runs || b.winRate - a.winRate);
+
+  // Character popularity in multiplayer (all players, not just player 0)
+  const charMap = new Map<string, { apps: number; wins: number }>();
+  for (const run of multiRuns) {
+    const seen = new Set<string>();
+    for (const p of run.allPlayers) {
+      if (!charMap.has(p.character)) charMap.set(p.character, { apps: 0, wins: 0 });
+      charMap.get(p.character)!.apps++;
+      if (!seen.has(p.character) && run.win) {
+        // Count win once per character per run even if duplicated
+      }
+      seen.add(p.character);
+    }
+    // Count wins per unique character in this run
+    if (run.win) {
+      const unique = new Set(run.allPlayers.map((p) => p.character));
+      for (const c of unique) {
+        if (charMap.has(c)) charMap.get(c)!.wins++;
+      }
+    }
+  }
+
+  const characterPopularity: CharacterPopularity[] = [];
+  charMap.forEach((s, character) => {
+    characterPopularity.push({
+      character,
+      appearances: s.apps,
+      wins: s.wins,
+      winRate: s.apps > 0 ? s.wins / s.apps : 0,
+    });
+  });
+  characterPopularity.sort((a, b) => b.appearances - a.appearances);
+
+  return {
+    multiplayerRuns: multiRuns.length,
+    soloRuns: soloRuns.length,
+    playerCountStats,
+    teamCompStats,
+    characterPopularity,
+    hasMultiplayerData: multiRuns.length > 0,
+  };
+}

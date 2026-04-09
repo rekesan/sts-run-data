@@ -105,7 +105,17 @@ export const RunsPanel: React.FC<RunsPanelProps> = ({ runs }) => {
       label: "Relics",
       accessor: (r) => r.relics.length,
       numeric: true,
-      width: "60px",
+      width: "55px",
+    },
+    {
+      key: "players",
+      label: "Players",
+      accessor: (r) => r.playerCount,
+      numeric: true,
+      render: (r) => r.playerCount > 1
+        ? <span className="badge neutral">{r.playerCount}P</span>
+        : <span className="text-muted">Solo</span>,
+      width: "65px",
     },
   ];
 

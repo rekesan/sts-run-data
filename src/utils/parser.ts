@@ -41,17 +41,24 @@ export interface PotionEvent {
   action: "used" | "picked" | "discarded";
 }
 
+export interface PlayerData {
+  character: string;
+  relics: string[];
+  finalDeck: string[];
+  deckSize: number;
+}
+
 export interface RunData {
   filename: string;
-  character: string;
+  character: string; // primary player (player[0])
   ascension: number | null;
   runTime: number; // minutes
   win: boolean;
   wasAbandoned: boolean;
   startTime: number; // unix timestamp
-  killedBy: string | null; // encounter that killed the player
-  killedByType: string | null; // elite/boss/monster
-  acts: string[]; // e.g. ["ACT.UNDERDOCKS", "ACT.HIVE", "ACT.GLORY"]
+  killedBy: string | null;
+  killedByType: string | null;
+  acts: string[];
   diedInAct: string | null;
   relics: string[];
   floors: FloorData[];
@@ -64,6 +71,10 @@ export interface RunData {
   ancientChoices: AncientChoice[];
   cardOperations: CardOperation[];
   potionEvents: PotionEvent[];
+  // Multiplayer
+  playerCount: number;
+  allPlayers: PlayerData[];
+  teamComp: string; // sorted characters joined, e.g. "Defect + Ironclad"
 }
 
 export interface CardChoice {
@@ -633,12 +644,29 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
           : [];
         const diedInAct = findDiedInAct(data);
 
-        // Relics
-        const rawRelics = Array.isArray(player.relics) ? player.relics : [];
-        const relics = rawRelics.map((r: unknown) => {
-          const rObj = r as Record<string, unknown>;
-          return cleanRelicName(typeof rObj?.id === "string" ? rObj.id : "");
+        // All players data (multiplayer support)
+        const playerCount = players.length;
+        const allPlayers: PlayerData[] = players.map((p: unknown) => {
+          const pl = p as Record<string, unknown>;
+          const pRelics = Array.isArray(pl.relics) ? pl.relics : [];
+          const pDeck = extractFinalDeck(data, pl);
+          return {
+            character: cleanCharacterName(typeof pl.character === "string" ? pl.character : ""),
+            relics: pRelics.map((r: unknown) => {
+              const rObj = r as Record<string, unknown>;
+              return cleanRelicName(typeof rObj?.id === "string" ? rObj.id : "");
+            }),
+            finalDeck: pDeck,
+            deckSize: pDeck.length,
+          };
         });
+
+        const teamComp = playerCount > 1
+          ? [...allPlayers].map((p) => p.character).sort().join(" + ")
+          : character;
+
+        // Primary player relics
+        const relics = allPlayers[0]?.relics ?? [];
 
         // Card choices
         const cardChoices: CardChoice[] = [];
@@ -650,8 +678,8 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
         // Bosses
         const bossesEncountered = extractBosses(data, win);
 
-        // Final deck
-        const finalDeck = extractFinalDeck(data, player);
+        // Final deck (primary player)
+        const finalDeck = allPlayers[0]?.finalDeck ?? [];
 
         // Rest site choices
         const restSiteChoices = extractRestSiteChoices(data);
@@ -694,6 +722,9 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
           ancientChoices,
           cardOperations,
           potionEvents,
+          playerCount,
+          allPlayers,
+          teamComp,
         });
       }
 
