@@ -57,13 +57,24 @@ export const RunsPanel: React.FC<RunsPanelProps> = ({ runs }) => {
     {
       key: "win",
       label: "Result",
-      accessor: (r) => (r.win ? 1 : 0),
+      accessor: (r) => (r.win ? 2 : r.wasAbandoned ? 0 : 1),
       render: (r) => (
-        <span className={`badge ${r.win ? "positive" : "negative"}`}>
-          {r.win ? "Win" : "Loss"}
+        <span className={`badge ${r.win ? "positive" : r.wasAbandoned ? "neutral" : "negative"}`}>
+          {r.win ? "Win" : r.wasAbandoned ? "Quit" : "Loss"}
         </span>
       ),
       width: "70px",
+    },
+    {
+      key: "killedBy",
+      label: "Killed By",
+      accessor: (r) => r.killedBy || "",
+      render: (r) => r.killedBy ? (
+        <span className="text-muted" title={r.killedBy}>
+          {r.killedBy.length > 18 ? r.killedBy.substring(0, 18) + "…" : r.killedBy}
+        </span>
+      ) : "—",
+      width: "140px",
     },
     {
       key: "maxFloor",
@@ -71,7 +82,7 @@ export const RunsPanel: React.FC<RunsPanelProps> = ({ runs }) => {
       accessor: (r) => r.maxFloorReached,
       numeric: true,
       render: (r) => (r.maxFloorReached > 0 ? String(r.maxFloorReached) : "—"),
-      width: "70px",
+      width: "60px",
     },
     {
       key: "deckSize",
@@ -79,7 +90,7 @@ export const RunsPanel: React.FC<RunsPanelProps> = ({ runs }) => {
       accessor: (r) => r.deckSize,
       numeric: true,
       render: (r) => (r.deckSize > 0 ? String(r.deckSize) : "—"),
-      width: "60px",
+      width: "55px",
     },
     {
       key: "runTime",
@@ -87,19 +98,27 @@ export const RunsPanel: React.FC<RunsPanelProps> = ({ runs }) => {
       accessor: (r) => r.runTime,
       numeric: true,
       render: (r) => `${r.runTime.toFixed(1)}m`,
-      width: "70px",
+      width: "65px",
     },
     {
       key: "relicCount",
       label: "Relics",
       accessor: (r) => r.relics.length,
       numeric: true,
-      width: "70px",
+      width: "60px",
     },
   ];
 
   const expandedContent = (run: RunData) => (
     <div className="run-expanded">
+      {run.killedBy && (
+        <div className="run-detail-section">
+          <h4>☠️ Killed by: <span style={{ color: "var(--accent-secondary)" }}>{run.killedBy}</span>
+            {run.killedByType && <span className="text-muted"> ({run.killedByType})</span>}
+            {run.diedInAct && <span className="text-muted"> — {run.diedInAct}</span>}
+          </h4>
+        </div>
+      )}
       <div className="run-detail-section">
         <h4>
           <Award size={14} /> Relics ({run.relics.length})

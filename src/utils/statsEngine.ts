@@ -13,10 +13,7 @@ export interface ComputedRelicStats {
   trapRelics: RelicStats[];
 }
 
-export function computeRelicStats(
-  runs: RunData[],
-  minCount: number,
-): ComputedRelicStats {
+export function computeRelicStats(runs: RunData[], minCount: number): ComputedRelicStats {
   const totalRuns = runs.length;
   const totalWins = runs.filter((r) => r.win).length;
   const overallWinrate = totalRuns > 0 ? totalWins / totalRuns : 0;
@@ -24,85 +21,63 @@ export function computeRelicStats(
   const relicMap = new Map<string, { wins: number; total: number }>();
   for (const run of runs) {
     for (const relic of run.relics) {
-      if (!relicMap.has(relic)) {
-        relicMap.set(relic, { wins: 0, total: 0 });
-      }
-      const stats = relicMap.get(relic)!;
-      stats.total++;
-      if (run.win) stats.wins++;
+      if (!relicMap.has(relic)) relicMap.set(relic, { wins: 0, total: 0 });
+      const s = relicMap.get(relic)!;
+      s.total++;
+      if (run.win) s.wins++;
     }
   }
 
-  let allRelicStats: RelicStats[] = [];
+  const allRelicStats: RelicStats[] = [];
   relicMap.forEach((stats, relic) => {
     if (stats.total >= minCount) {
       const winrate = stats.wins / stats.total;
-      allRelicStats.push({
-        relic,
-        count: stats.total,
-        winrate,
-        delta: winrate - overallWinrate,
-      });
+      allRelicStats.push({ relic, count: stats.total, winrate, delta: winrate - overallWinrate });
     }
   });
-
   allRelicStats.sort((a, b) => b.winrate - a.winrate || b.count - a.count);
 
-  const powerfulRelics = allRelicStats
-    .filter((r) => r.winrate > overallWinrate)
-    .sort((a, b) => b.winrate - a.winrate || b.count - a.count);
-
-  const trapRelics = allRelicStats
-    .filter((r) => r.winrate < overallWinrate)
-    .sort((a, b) => a.winrate - b.winrate || b.count - a.count);
-
-  return { overallWinrate, allRelicStats, powerfulRelics, trapRelics };
+  return {
+    overallWinrate,
+    allRelicStats,
+    powerfulRelics: allRelicStats.filter((r) => r.winrate > overallWinrate),
+    trapRelics: allRelicStats
+      .filter((r) => r.winrate < overallWinrate)
+      .sort((a, b) => a.winrate - b.winrate || b.count - a.count),
+  };
 }
 
 // ─── Card Stats ─────────────────────────────────────────────────────
 
-export function computeCardStats(
-  runs: RunData[],
-  minCount: number,
-): CardStats[] {
-  const cardOffered: Record<string, number> = {};
-  const cardPicked: Record<string, number> = {};
-  const cardWins: Record<string, number> = {};
+export function computeCardStats(runs: RunData[], minCount: number): CardStats[] {
+  const offered: Record<string, number> = {};
+  const picked: Record<string, number> = {};
+  const wins: Record<string, number> = {};
 
   for (const run of runs) {
-    for (const choice of run.cardChoices) {
-      if (choice.inShop) continue; // Skip shop purchases
-
-      const name = choice.cardName;
-      cardOffered[name] = (cardOffered[name] || 0) + 1;
-
-      if (choice.wasPicked) {
-        cardPicked[name] = (cardPicked[name] || 0) + 1;
-        if (run.win) {
-          cardWins[name] = (cardWins[name] || 0) + 1;
-        }
+    for (const c of run.cardChoices) {
+      if (c.inShop) continue;
+      offered[c.cardName] = (offered[c.cardName] || 0) + 1;
+      if (c.wasPicked) {
+        picked[c.cardName] = (picked[c.cardName] || 0) + 1;
+        if (run.win) wins[c.cardName] = (wins[c.cardName] || 0) + 1;
       }
     }
   }
 
   const stats: CardStats[] = [];
-  for (const cardName in cardOffered) {
-    const offered = cardOffered[cardName] || 0;
-    const picked = cardPicked[cardName] || 0;
-    const wins = cardWins[cardName] || 0;
-
-    if (offered >= minCount) {
+  for (const name in offered) {
+    const o = offered[name] || 0;
+    const p = picked[name] || 0;
+    const w = wins[name] || 0;
+    if (o >= minCount) {
       stats.push({
-        cardName,
-        timesOffered: offered,
-        timesPicked: picked,
-        pickRate: offered > 0 ? picked / offered : 0,
-        winsWhenPicked: wins,
-        winRateWhenPicked: picked > 0 ? wins / picked : 0,
+        cardName: name, timesOffered: o, timesPicked: p,
+        pickRate: o > 0 ? p / o : 0, winsWhenPicked: w,
+        winRateWhenPicked: p > 0 ? w / p : 0,
       });
     }
   }
-
   stats.sort((a, b) => b.pickRate - a.pickRate || b.timesOffered - a.timesOffered);
   return stats;
 }
@@ -130,129 +105,359 @@ export interface ComputedBossStats {
   hasBossData: boolean;
 }
 
-export function computeBossStats(
-  runs: RunData[],
-  minCount: number,
-): ComputedBossStats {
+export function computeBossStats(runs: RunData[], minCount: number): ComputedBossStats {
   const bossMap = new Map<string, { encountered: number; defeated: number }>();
-  const bossCharMap = new Map<
-    string,
-    { encountered: number; defeated: number }
-  >();
+  const bossCharMap = new Map<string, { encountered: number; defeated: number }>();
 
   for (const run of runs) {
     for (const boss of run.bossesEncountered) {
-      // Overall boss stats
-      if (!bossMap.has(boss.name)) {
-        bossMap.set(boss.name, { encountered: 0, defeated: 0 });
-      }
-      const stats = bossMap.get(boss.name)!;
-      stats.encountered++;
-      if (boss.defeated) stats.defeated++;
+      if (!bossMap.has(boss.name)) bossMap.set(boss.name, { encountered: 0, defeated: 0 });
+      const s = bossMap.get(boss.name)!;
+      s.encountered++;
+      if (boss.defeated) s.defeated++;
 
-      // Boss-by-character
       const key = `${boss.name}|||${run.character}`;
-      if (!bossCharMap.has(key)) {
-        bossCharMap.set(key, { encountered: 0, defeated: 0 });
-      }
-      const charStats = bossCharMap.get(key)!;
-      charStats.encountered++;
-      if (boss.defeated) charStats.defeated++;
+      if (!bossCharMap.has(key)) bossCharMap.set(key, { encountered: 0, defeated: 0 });
+      const c = bossCharMap.get(key)!;
+      c.encountered++;
+      if (boss.defeated) c.defeated++;
     }
   }
 
   const bossStats: BossStats[] = [];
-  bossMap.forEach((stats, name) => {
-    if (stats.encountered >= minCount) {
-      bossStats.push({
-        name,
-        encountered: stats.encountered,
-        defeated: stats.defeated,
-        winrate: stats.encountered > 0 ? stats.defeated / stats.encountered : 0,
-      });
-    }
+  bossMap.forEach((s, name) => {
+    if (s.encountered >= minCount)
+      bossStats.push({ name, ...s, winrate: s.encountered > 0 ? s.defeated / s.encountered : 0 });
   });
   bossStats.sort((a, b) => a.winrate - b.winrate || b.encountered - a.encountered);
 
   const bossCharacterStats: BossCharacterStats[] = [];
-  bossCharMap.forEach((stats, key) => {
+  bossCharMap.forEach((s, key) => {
     const [bossName, character] = key.split("|||");
-    if (stats.encountered >= Math.max(1, Math.floor(minCount / 2))) {
-      bossCharacterStats.push({
-        bossName,
-        character,
-        encountered: stats.encountered,
-        defeated: stats.defeated,
-        winrate:
-          stats.encountered > 0 ? stats.defeated / stats.encountered : 0,
-      });
-    }
+    if (s.encountered >= Math.max(1, Math.floor(minCount / 2)))
+      bossCharacterStats.push({ bossName, character, ...s, winrate: s.encountered > 0 ? s.defeated / s.encountered : 0 });
   });
 
+  return { bossStats, bossCharacterStats, hasBossData: bossMap.size > 0 };
+}
+
+// ─── Death Stats ────────────────────────────────────────────────────
+
+export interface KilledByStats {
+  encounter: string;
+  encounterType: string;
+  count: number;
+}
+
+export interface DeathByActStats {
+  act: string;
+  count: number;
+}
+
+export interface DeathByFloorRange {
+  range: string;
+  count: number;
+}
+
+export interface ComputedDeathStats {
+  killedBy: KilledByStats[];
+  deathsByType: { type: string; count: number }[];
+  deathsByAct: DeathByActStats[];
+  deathsByFloorRange: DeathByFloorRange[];
+  totalDeaths: number;
+  hasDeathData: boolean;
+}
+
+export function computeDeathStats(runs: RunData[]): ComputedDeathStats {
+  const losses = runs.filter((r) => !r.win && !r.wasAbandoned);
+
+  const killedByMap = new Map<string, { type: string; count: number }>();
+  const typeMap = new Map<string, number>();
+  const actMap = new Map<string, number>();
+  const floorRanges: { label: string; min: number; max: number; count: number }[] = [
+    { label: "1-7", min: 1, max: 7, count: 0 },
+    { label: "8-15", min: 8, max: 15, count: 0 },
+    { label: "16-25", min: 16, max: 25, count: 0 },
+    { label: "26-35", min: 26, max: 35, count: 0 },
+    { label: "36-48", min: 36, max: 48, count: 0 },
+  ];
+
+  for (const run of losses) {
+    // Killed by
+    if (run.killedBy) {
+      if (!killedByMap.has(run.killedBy)) {
+        killedByMap.set(run.killedBy, { type: run.killedByType || "unknown", count: 0 });
+      }
+      killedByMap.get(run.killedBy)!.count++;
+    }
+
+    // Type
+    const type = run.killedByType || "unknown";
+    typeMap.set(type, (typeMap.get(type) || 0) + 1);
+
+    // Act
+    if (run.diedInAct) {
+      actMap.set(run.diedInAct, (actMap.get(run.diedInAct) || 0) + 1);
+    }
+
+    // Floor range
+    const bucket = floorRanges.find(
+      (b) => run.maxFloorReached >= b.min && run.maxFloorReached <= b.max,
+    );
+    if (bucket) bucket.count++;
+  }
+
+  const killedBy: KilledByStats[] = [];
+  killedByMap.forEach((s, encounter) => {
+    killedBy.push({ encounter, encounterType: s.type, count: s.count });
+  });
+  killedBy.sort((a, b) => b.count - a.count);
+
+  const deathsByType: { type: string; count: number }[] = [];
+  typeMap.forEach((count, type) => deathsByType.push({ type, count }));
+  deathsByType.sort((a, b) => b.count - a.count);
+
+  const deathsByAct: DeathByActStats[] = [];
+  actMap.forEach((count, act) => deathsByAct.push({ act, count }));
+  deathsByAct.sort((a, b) => b.count - a.count);
+
   return {
-    bossStats,
-    bossCharacterStats,
-    hasBossData: bossMap.size > 0,
+    killedBy,
+    deathsByType,
+    deathsByAct,
+    deathsByFloorRange: floorRanges.filter((b) => b.count > 0).map((b) => ({ range: b.label, count: b.count })),
+    totalDeaths: losses.length,
+    hasDeathData: killedBy.length > 0,
   };
 }
 
-// ─── Floor / Path Stats ─────────────────────────────────────────────
+// ─── Win Rate Over Time ─────────────────────────────────────────────
 
-export interface FloorTypeStats {
-  type: string;
+export interface WinRatePoint {
+  runIndex: number;
+  rollingWinrate: number;
+  date: string;
+  character: string;
+  win: boolean;
+}
+
+export function computeWinRateOverTime(runs: RunData[], windowSize = 10): WinRatePoint[] {
+  // runs are already sorted by startTime from parser
+  const points: WinRatePoint[] = [];
+
+  for (let i = 0; i < runs.length; i++) {
+    const start = Math.max(0, i - windowSize + 1);
+    const window = runs.slice(start, i + 1);
+    const winCount = window.filter((r) => r.win).length;
+    const rollingWinrate = winCount / window.length;
+
+    const date = runs[i].startTime > 0
+      ? new Date(runs[i].startTime * 1000).toLocaleDateString()
+      : `Run ${i + 1}`;
+
+    points.push({
+      runIndex: i + 1,
+      rollingWinrate,
+      date,
+      character: runs[i].character,
+      win: runs[i].win,
+    });
+  }
+
+  return points;
+}
+
+// ─── Rest Site Stats ────────────────────────────────────────────────
+
+export interface RestSiteStats {
+  choice: string;
   count: number;
-  avgPerRun: number;
+  winsWhenChosen: number;
+  winRate: number;
 }
 
-export interface ComputedFloorStats {
-  avgFloorReachedWins: number;
-  avgFloorReachedLosses: number;
-  avgFloorReachedOverall: number;
-  floorTypeCounts: FloorTypeStats[];
-  hasFloorData: boolean;
-}
-
-export function computeFloorStats(runs: RunData[]): ComputedFloorStats {
-  const wins = runs.filter((r) => r.win);
-  const losses = runs.filter((r) => !r.win);
-
-  const avgFloor = (arr: RunData[]) =>
-    arr.length > 0
-      ? arr.reduce((sum, r) => sum + r.maxFloorReached, 0) / arr.length
-      : 0;
-
-  const typeMap = new Map<string, number>();
-  let runsWithFloors = 0;
+export function computeRestSiteStats(runs: RunData[]): RestSiteStats[] {
+  const choiceMap = new Map<string, { count: number; wins: number }>();
 
   for (const run of runs) {
-    if (run.floors.length > 0) {
-      runsWithFloors++;
-      for (const floor of run.floors) {
-        typeMap.set(floor.type, (typeMap.get(floor.type) || 0) + 1);
+    const choicesSeen = new Set<string>();
+    for (const rsc of run.restSiteChoices) {
+      choicesSeen.add(rsc.choice);
+    }
+    for (const choice of choicesSeen) {
+      if (!choiceMap.has(choice)) choiceMap.set(choice, { count: 0, wins: 0 });
+      const s = choiceMap.get(choice)!;
+      s.count += run.restSiteChoices.filter((c) => c.choice === choice).length;
+      if (run.win) s.wins += run.restSiteChoices.filter((c) => c.choice === choice).length;
+    }
+  }
+
+  // Actually let's count per-choice (not per-run)
+  const perChoice = new Map<string, { total: number; runsW: number; runsT: number }>();
+  for (const run of runs) {
+    const seen = new Set<string>();
+    for (const rsc of run.restSiteChoices) {
+      if (!perChoice.has(rsc.choice)) perChoice.set(rsc.choice, { total: 0, runsW: 0, runsT: 0 });
+      perChoice.get(rsc.choice)!.total++;
+      if (!seen.has(rsc.choice)) {
+        perChoice.get(rsc.choice)!.runsT++;
+        if (run.win) perChoice.get(rsc.choice)!.runsW++;
+        seen.add(rsc.choice);
       }
     }
   }
 
-  const floorTypeCounts: FloorTypeStats[] = [];
-  typeMap.forEach((count, type) => {
-    floorTypeCounts.push({
-      type,
-      count,
-      avgPerRun: runsWithFloors > 0 ? count / runsWithFloors : 0,
+  const stats: RestSiteStats[] = [];
+  perChoice.forEach((s, choice) => {
+    stats.push({
+      choice,
+      count: s.total,
+      winsWhenChosen: s.runsW,
+      winRate: s.runsT > 0 ? s.runsW / s.runsT : 0,
     });
   });
-  floorTypeCounts.sort((a, b) => b.count - a.count);
+  stats.sort((a, b) => b.count - a.count);
+  return stats;
+}
+
+// ─── Ancient/Neow Stats ─────────────────────────────────────────────
+
+export interface AncientStats {
+  name: string;
+  timesChosen: number;
+  timesOffered: number;
+  pickRate: number;
+  winRate: number;
+}
+
+export function computeAncientStats(runs: RunData[], minCount: number): AncientStats[] {
+  const map = new Map<string, { chosen: number; offered: number; wins: number; runsChosen: number }>();
+
+  for (const run of runs) {
+    for (const ac of run.ancientChoices) {
+      if (!map.has(ac.name)) map.set(ac.name, { chosen: 0, offered: 0, wins: 0, runsChosen: 0 });
+      const s = map.get(ac.name)!;
+      s.offered++;
+      if (ac.wasChosen) {
+        s.chosen++;
+        s.runsChosen++;
+        if (run.win) s.wins++;
+      }
+    }
+  }
+
+  const stats: AncientStats[] = [];
+  map.forEach((s, name) => {
+    if (s.offered >= minCount) {
+      stats.push({
+        name,
+        timesChosen: s.chosen,
+        timesOffered: s.offered,
+        pickRate: s.offered > 0 ? s.chosen / s.offered : 0,
+        winRate: s.runsChosen > 0 ? s.wins / s.runsChosen : 0,
+      });
+    }
+  });
+  stats.sort((a, b) => b.timesChosen - a.timesChosen);
+  return stats;
+}
+
+// ─── Card Operations Stats ──────────────────────────────────────────
+
+export interface CardOpStats {
+  cardName: string;
+  count: number;
+  type: "upgrade" | "remove" | "transform";
+  winRate: number;
+}
+
+export function computeCardOpStats(runs: RunData[], type: "upgrade" | "remove" | "transform"): CardOpStats[] {
+  const cardMap = new Map<string, { count: number; wins: number; runsT: number }>();
+
+  for (const run of runs) {
+    const seen = new Set<string>();
+    for (const op of run.cardOperations) {
+      if (op.type !== type) continue;
+      if (!cardMap.has(op.cardName)) cardMap.set(op.cardName, { count: 0, wins: 0, runsT: 0 });
+      cardMap.get(op.cardName)!.count++;
+      if (!seen.has(op.cardName)) {
+        cardMap.get(op.cardName)!.runsT++;
+        if (run.win) cardMap.get(op.cardName)!.wins++;
+        seen.add(op.cardName);
+      }
+    }
+  }
+
+  const stats: CardOpStats[] = [];
+  cardMap.forEach((s, cardName) => {
+    stats.push({
+      cardName,
+      count: s.count,
+      type,
+      winRate: s.runsT > 0 ? s.wins / s.runsT : 0,
+    });
+  });
+  stats.sort((a, b) => b.count - a.count);
+  return stats;
+}
+
+// ─── Potion Stats ───────────────────────────────────────────────────
+
+export interface PotionStats {
+  name: string;
+  timesUsed: number;
+}
+
+export function computePotionStats(runs: RunData[]): PotionStats[] {
+  const map = new Map<string, number>();
+
+  for (const run of runs) {
+    for (const pe of run.potionEvents) {
+      if (pe.action === "used") {
+        map.set(pe.potionName, (map.get(pe.potionName) || 0) + 1);
+      }
+    }
+  }
+
+  const stats: PotionStats[] = [];
+  map.forEach((count, name) => stats.push({ name, timesUsed: count }));
+  stats.sort((a, b) => b.timesUsed - a.timesUsed);
+  return stats;
+}
+
+// ─── Combat Turns Stats ─────────────────────────────────────────────
+
+export interface CombatTurnsStats {
+  avgTurnsMonster: number;
+  avgTurnsElite: number;
+  avgTurnsBoss: number;
+  avgTurnsOverall: number;
+}
+
+export function computeCombatTurnsStats(runs: RunData[]): CombatTurnsStats {
+  const byType: Record<string, number[]> = { monster: [], elite: [], boss: [] };
+  const all: number[] = [];
+
+  for (const run of runs) {
+    for (const f of run.floors) {
+      if (f.turnsTaken !== undefined && f.turnsTaken > 0) {
+        all.push(f.turnsTaken);
+        if (f.type in byType) byType[f.type].push(f.turnsTaken);
+      }
+    }
+  }
+
+  const avg = (arr: number[]) => arr.length > 0 ? arr.reduce((s, v) => s + v, 0) / arr.length : 0;
 
   return {
-    avgFloorReachedWins: avgFloor(wins),
-    avgFloorReachedLosses: avgFloor(losses),
-    avgFloorReachedOverall: avgFloor(runs),
-    floorTypeCounts,
-    hasFloorData: runsWithFloors > 0,
+    avgTurnsMonster: avg(byType.monster),
+    avgTurnsElite: avg(byType.elite),
+    avgTurnsBoss: avg(byType.boss),
+    avgTurnsOverall: avg(all),
   };
 }
 
-// ─── Deck Stats ─────────────────────────────────────────────────────
+// ─── Deck Size Stats ────────────────────────────────────────────────
 
 export interface DeckSizeBucket {
   range: string;
@@ -263,25 +468,14 @@ export interface DeckSizeBucket {
   winrate: number;
 }
 
-export interface ComputedDeckStats {
-  avgDeckSizeWins: number;
-  avgDeckSizeLosses: number;
-  avgDeckSizeOverall: number;
-  deckSizeBuckets: DeckSizeBucket[];
-  hasDeckData: boolean;
-}
-
-export function computeDeckStats(runs: RunData[]): ComputedDeckStats {
+export function computeDeckStats(runs: RunData[]) {
   const withDecks = runs.filter((r) => r.deckSize > 0);
   const wins = withDecks.filter((r) => r.win);
   const losses = withDecks.filter((r) => !r.win);
 
   const avg = (arr: RunData[]) =>
-    arr.length > 0
-      ? arr.reduce((sum, r) => sum + r.deckSize, 0) / arr.length
-      : 0;
+    arr.length > 0 ? arr.reduce((s, r) => s + r.deckSize, 0) / arr.length : 0;
 
-  // Build bucket ranges
   const buckets: DeckSizeBucket[] = [
     { range: "1-10", min: 1, max: 10, count: 0, wins: 0, winrate: 0 },
     { range: "11-15", min: 11, max: 15, count: 0, wins: 0, winrate: 0 },
@@ -294,18 +488,10 @@ export function computeDeckStats(runs: RunData[]): ComputedDeckStats {
   ];
 
   for (const run of withDecks) {
-    const bucket = buckets.find(
-      (b) => run.deckSize >= b.min && run.deckSize <= b.max,
-    );
-    if (bucket) {
-      bucket.count++;
-      if (run.win) bucket.wins++;
-    }
+    const b = buckets.find((b) => run.deckSize >= b.min && run.deckSize <= b.max);
+    if (b) { b.count++; if (run.win) b.wins++; }
   }
-
-  for (const bucket of buckets) {
-    bucket.winrate = bucket.count > 0 ? bucket.wins / bucket.count : 0;
-  }
+  for (const b of buckets) b.winrate = b.count > 0 ? b.wins / b.count : 0;
 
   return {
     avgDeckSizeWins: avg(wins),

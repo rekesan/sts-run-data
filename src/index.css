@@ -818,3 +818,64 @@ h1, h2, h3, h4 {
   font-size: 0.8rem;
   color: var(--text-secondary);
 }
+
+/* ─── Death Panel Grid ─────────────────────────────────────────── */
+
+.death-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2rem;
+}
+
+@media (max-width: 768px) {
+  .death-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.death-chart-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.death-chart-cell h4 {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+/* ─── Abandoned Toggle ─────────────────────────────────────────── */
+
+.abandoned-toggle {
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--border-color);
+}
+
+.abandoned-toggle label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.abandoned-toggle input[type="checkbox"] {
+  accent-color: var(--accent-primary);
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+/* ─── Run Expanded ─────────────────────────────────────────────── */
+
+.run-expanded {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}

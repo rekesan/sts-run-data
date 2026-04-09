@@ -2,10 +2,16 @@
 
 export interface FloorData {
   floor: number;
-  type: string; // "elite", "boss", "shop", "event", "rest", "monster", "treasure", etc.
+  type: string;
   hpBefore?: number;
   hpAfter?: number;
+  maxHp?: number;
+  damageTaken?: number;
   goldChange?: number;
+  currentGold?: number;
+  encounter?: string;      // rooms[0].model_id
+  monsterIds?: string[];    // rooms[0].monster_ids
+  turnsTaken?: number;      // rooms[0].turns_taken
 }
 
 export interface BossEncounter {
@@ -14,20 +20,50 @@ export interface BossEncounter {
   floor?: number;
 }
 
+export interface RestSiteChoice {
+  choice: string; // SMITH, HEAL, DIG, etc.
+  floor: number;
+}
+
+export interface AncientChoice {
+  name: string;    // TextKey
+  wasChosen: boolean;
+}
+
+export interface CardOperation {
+  cardName: string;
+  floor: number;
+  type: "upgrade" | "remove" | "transform";
+}
+
+export interface PotionEvent {
+  potionName: string;
+  action: "used" | "picked" | "discarded";
+}
+
 export interface RunData {
   filename: string;
   character: string;
   ascension: number | null;
   runTime: number; // minutes
   win: boolean;
+  wasAbandoned: boolean;
+  startTime: number; // unix timestamp
+  killedBy: string | null; // encounter that killed the player
+  killedByType: string | null; // elite/boss/monster
+  acts: string[]; // e.g. ["ACT.UNDERDOCKS", "ACT.HIVE", "ACT.GLORY"]
+  diedInAct: string | null;
   relics: string[];
   floors: FloorData[];
   bossesEncountered: BossEncounter[];
   finalDeck: string[];
   deckSize: number;
   maxFloorReached: number;
-  // Card choice raw data (preserved per-run for dynamic re-computation)
   cardChoices: CardChoice[];
+  restSiteChoices: RestSiteChoice[];
+  ancientChoices: AncientChoice[];
+  cardOperations: CardOperation[];
+  potionEvents: PotionEvent[];
 }
 
 export interface CardChoice {
@@ -40,7 +76,7 @@ export interface RelicStats {
   relic: string;
   winrate: number;
   count: number;
-  delta: number; // difference from overall winrate
+  delta: number;
 }
 
 export interface CardStats {
@@ -96,6 +132,32 @@ function cleanBossName(rawName: string): string {
   return rawName
     .replace("BOSS.", "")
     .replace("ENEMY.", "")
+    .replace("MONSTER.", "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function cleanEncounterName(rawName: string): string {
+  return rawName
+    .replace("ENCOUNTER.", "")
+    .replace("_BOSS", "")
+    .replace("_ELITE", "")
+    .replace("_NORMAL", "")
+    .replace("_WEAK", "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function cleanPotionName(rawName: string): string {
+  return rawName
+    .replace("POTION.", "")
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (l) => l.toUpperCase());
+}
+
+function cleanActName(rawName: string): string {
+  return rawName
+    .replace("ACT.", "")
     .replace(/_/g, " ")
     .replace(/\b\w/g, (l) => l.toUpperCase());
 }
@@ -138,17 +200,9 @@ function extractCardChoices(
   }
 }
 
-/**
- * STS2 stores floor data in `map_point_history` — a nested array (one sub-array per act).
- * Each entry has:
- *   - map_point_type: "monster" | "elite" | "boss" | "shop" | "rest_site" | "treasure" | "unknown" | "ancient"
- *   - rooms[]: [{ model_id, monster_ids[], room_type, turns_taken }]
- *   - player_stats[]: [{ current_hp, damage_taken, max_hp, gold_gained, gold_spent, ... }]
- */
 function extractFloors(data: Record<string, unknown>): FloorData[] {
   const floors: FloorData[] = [];
   const mapPointHistory = data.map_point_history;
-
   if (!Array.isArray(mapPointHistory)) return floors;
 
   let floorNum = 0;
@@ -159,22 +213,32 @@ function extractFloors(data: Record<string, unknown>): FloorData[] {
       const e = entry as Record<string, unknown>;
       floorNum++;
 
-      const playerStats = Array.isArray(e.player_stats)
+      const ps = Array.isArray(e.player_stats)
         ? (e.player_stats[0] as Record<string, unknown> | undefined)
         : undefined;
+
+      const rooms = Array.isArray(e.rooms) ? e.rooms : [];
+      const room = rooms[0] as Record<string, unknown> | undefined;
+
+      const damageTaken = typeof ps?.damage_taken === "number" ? (ps.damage_taken as number) : 0;
+      const hpAfter = typeof ps?.current_hp === "number" ? (ps.current_hp as number) : undefined;
 
       floors.push({
         floor: floorNum,
         type: typeof e.map_point_type === "string" ? e.map_point_type : "unknown",
-        hpBefore: typeof playerStats?.current_hp === "number"
-          ? (playerStats.current_hp as number) + (typeof playerStats?.damage_taken === "number" ? (playerStats.damage_taken as number) : 0)
+        hpBefore: hpAfter !== undefined ? hpAfter + damageTaken : undefined,
+        hpAfter,
+        maxHp: typeof ps?.max_hp === "number" ? (ps.max_hp as number) : undefined,
+        damageTaken: damageTaken > 0 ? damageTaken : undefined,
+        goldChange: ps
+          ? ((typeof ps.gold_gained === "number" ? (ps.gold_gained as number) : 0)
+            - (typeof ps.gold_spent === "number" ? (ps.gold_spent as number) : 0)
+            - (typeof ps.gold_lost === "number" ? (ps.gold_lost as number) : 0))
           : undefined,
-        hpAfter: typeof playerStats?.current_hp === "number" ? (playerStats.current_hp as number) : undefined,
-        goldChange: playerStats
-          ? ((typeof playerStats.gold_gained === "number" ? (playerStats.gold_gained as number) : 0)
-            - (typeof playerStats.gold_spent === "number" ? (playerStats.gold_spent as number) : 0)
-            - (typeof playerStats.gold_lost === "number" ? (playerStats.gold_lost as number) : 0))
-          : undefined,
+        currentGold: typeof ps?.current_gold === "number" ? (ps.current_gold as number) : undefined,
+        encounter: typeof room?.model_id === "string" ? (room.model_id as string) : undefined,
+        monsterIds: Array.isArray(room?.monster_ids) ? (room.monster_ids as string[]) : undefined,
+        turnsTaken: typeof room?.turns_taken === "number" ? (room.turns_taken as number) : undefined,
       });
     }
   }
@@ -182,16 +246,9 @@ function extractFloors(data: Record<string, unknown>): FloorData[] {
   return floors;
 }
 
-/**
- * Bosses are floor entries with `map_point_type === "boss"` inside `map_point_history`.
- * The encounter name lives in `rooms[0].model_id` (e.g. "ENCOUNTER.WATERFALL_GIANT_BOSS").
- * Monster names are in `rooms[0].monster_ids` (e.g. ["MONSTER.WATERFALL_GIANT"]).
- * A boss is "defeated" if the player survived (current_hp > 0 after the fight).
- */
 function extractBosses(data: Record<string, unknown>, runWin: boolean): BossEncounter[] {
   const bosses: BossEncounter[] = [];
   const mapPointHistory = data.map_point_history;
-
   if (!Array.isArray(mapPointHistory)) return bosses;
 
   let floorNum = 0;
@@ -208,13 +265,11 @@ function extractBosses(data: Record<string, unknown>, runWin: boolean): BossEnco
 
       if (e.map_point_type !== "boss") continue;
 
-      // Get encounter name from rooms
       const rooms = Array.isArray(e.rooms) ? e.rooms : [];
       const room = rooms[0] as Record<string, unknown> | undefined;
 
       let bossName: string;
       if (room) {
-        // Use monster_ids for the boss name (cleaner than encounter ID)
         const monsterIds = Array.isArray(room.monster_ids) ? room.monster_ids : [];
         if (monsterIds.length > 0) {
           bossName = (monsterIds as string[])
@@ -222,29 +277,21 @@ function extractBosses(data: Record<string, unknown>, runWin: boolean): BossEnco
             .filter((n) => n.length > 0)
             .join(" & ");
         } else {
-          // Fallback to encounter model_id
           bossName = typeof room.model_id === "string"
-            ? cleanBossName(room.model_id.replace("ENCOUNTER.", "").replace("_BOSS", ""))
+            ? cleanEncounterName(room.model_id)
             : "Unknown Boss";
         }
       } else {
         bossName = "Unknown Boss";
       }
 
-      // Determine if defeated: check if player HP > 0 after the fight
-      const playerStats = Array.isArray(e.player_stats)
+      const ps = Array.isArray(e.player_stats)
         ? (e.player_stats[0] as Record<string, unknown> | undefined)
         : undefined;
-      const hpAfter = typeof playerStats?.current_hp === "number" ? (playerStats.current_hp as number) : -1;
-
-      // If HP > 0, boss was defeated. If this is the last boss and the run was a win, also defeated.
+      const hpAfter = typeof ps?.current_hp === "number" ? (ps.current_hp as number) : -1;
       const defeated = hpAfter > 0 || (actIdx === totalActs - 1 && runWin);
 
-      bosses.push({
-        name: bossName,
-        defeated,
-        floor: floorNum,
-      });
+      bosses.push({ name: bossName, defeated, floor: floorNum });
     }
   }
 
@@ -252,14 +299,12 @@ function extractBosses(data: Record<string, unknown>, runWin: boolean): BossEnco
 }
 
 function extractFinalDeck(
-  data: Record<string, unknown>,
+  _data: Record<string, unknown>,
   player: Record<string, unknown>,
 ): string[] {
-  // Try player.deck, player.master_deck, data.master_deck
   const deckSources = [
     player.deck,
     player.master_deck,
-    data.master_deck,
     player.cards,
   ];
 
@@ -282,6 +327,222 @@ function extractFinalDeck(
   return [];
 }
 
+function extractRestSiteChoices(data: Record<string, unknown>): RestSiteChoice[] {
+  const choices: RestSiteChoice[] = [];
+  const mph = data.map_point_history;
+  if (!Array.isArray(mph)) return choices;
+
+  let floorNum = 0;
+  for (const act of mph) {
+    if (!Array.isArray(act)) continue;
+    for (const entry of act) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      floorNum++;
+      if (e.map_point_type !== "rest_site") continue;
+
+      const playerStats = Array.isArray(e.player_stats) ? e.player_stats : [];
+      for (const ps of playerStats) {
+        if (!ps || typeof ps !== "object") continue;
+        const psr = ps as Record<string, unknown>;
+        const rsc = Array.isArray(psr.rest_site_choices) ? psr.rest_site_choices : [];
+        for (const rc of rsc) {
+          let choiceName: string;
+          if (typeof rc === "string") {
+            choiceName = rc;
+          } else if (rc && typeof rc === "object") {
+            const rcr = rc as Record<string, unknown>;
+            choiceName = typeof rcr.choice === "string" ? rcr.choice : "";
+          } else {
+            continue;
+          }
+          if (choiceName) {
+            choices.push({ choice: choiceName, floor: floorNum });
+          }
+        }
+      }
+    }
+  }
+
+  return choices;
+}
+
+function extractAncientChoices(data: Record<string, unknown>): AncientChoice[] {
+  const choices: AncientChoice[] = [];
+  const mph = data.map_point_history;
+  if (!Array.isArray(mph)) return choices;
+
+  for (const act of mph) {
+    if (!Array.isArray(act)) continue;
+    for (const entry of act) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      if (e.map_point_type !== "ancient") continue;
+
+      const playerStats = Array.isArray(e.player_stats) ? e.player_stats : [];
+      for (const ps of playerStats) {
+        if (!ps || typeof ps !== "object") continue;
+        const psr = ps as Record<string, unknown>;
+        const ac = Array.isArray(psr.ancient_choice) ? psr.ancient_choice : [];
+        for (const choice of ac) {
+          if (!choice || typeof choice !== "object") continue;
+          const cr = choice as Record<string, unknown>;
+          const textKey = typeof cr.TextKey === "string" ? cr.TextKey : "";
+          if (textKey) {
+            choices.push({
+              name: textKey.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase()),
+              wasChosen: Boolean(cr.was_chosen),
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return choices;
+}
+
+function extractCardOperations(data: Record<string, unknown>): CardOperation[] {
+  const ops: CardOperation[] = [];
+  const mph = data.map_point_history;
+  if (!Array.isArray(mph)) return ops;
+
+  let floorNum = 0;
+  for (const act of mph) {
+    if (!Array.isArray(act)) continue;
+    for (const entry of act) {
+      if (!entry || typeof entry !== "object") continue;
+      floorNum++;
+      const e = entry as Record<string, unknown>;
+
+      const playerStats = Array.isArray(e.player_stats) ? e.player_stats : [];
+      for (const ps of playerStats) {
+        if (!ps || typeof ps !== "object") continue;
+        const psr = ps as Record<string, unknown>;
+
+        // Upgrades
+        const upgraded = Array.isArray(psr.upgraded_cards) ? psr.upgraded_cards : [];
+        for (const card of upgraded) {
+          const id = typeof card === "string" ? card : (card && typeof card === "object" ? (card as Record<string, unknown>).id : null);
+          if (typeof id === "string") {
+            ops.push({ cardName: cleanCardName(id), floor: floorNum, type: "upgrade" });
+          }
+        }
+
+        // Removals
+        const removed = Array.isArray(psr.cards_removed) ? psr.cards_removed : [];
+        for (const card of removed) {
+          const id = typeof card === "string" ? card : (card && typeof card === "object" ? (card as Record<string, unknown>).id : null);
+          if (typeof id === "string") {
+            ops.push({ cardName: cleanCardName(id), floor: floorNum, type: "remove" });
+          }
+        }
+
+        // Transforms
+        const transformed = Array.isArray(psr.cards_transformed) ? psr.cards_transformed : [];
+        for (const card of transformed) {
+          if (!card || typeof card !== "object") continue;
+          const cr = card as Record<string, unknown>;
+          const orig = cr.original_card as Record<string, unknown> | undefined;
+          if (orig && typeof orig.id === "string") {
+            ops.push({ cardName: cleanCardName(orig.id), floor: floorNum, type: "transform" });
+          }
+        }
+      }
+    }
+  }
+
+  return ops;
+}
+
+function extractPotionEvents(data: Record<string, unknown>): PotionEvent[] {
+  const events: PotionEvent[] = [];
+  const mph = data.map_point_history;
+  if (!Array.isArray(mph)) return events;
+
+  for (const act of mph) {
+    if (!Array.isArray(act)) continue;
+    for (const entry of act) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+
+      const playerStats = Array.isArray(e.player_stats) ? e.player_stats : [];
+      for (const ps of playerStats) {
+        if (!ps || typeof ps !== "object") continue;
+        const psr = ps as Record<string, unknown>;
+
+        // Used
+        const used = Array.isArray(psr.potion_used) ? psr.potion_used : [];
+        for (const p of used) {
+          const name = typeof p === "string" ? p : "";
+          if (name) events.push({ potionName: cleanPotionName(name), action: "used" });
+        }
+
+        // Picked
+        const choices = Array.isArray(psr.potion_choices) ? psr.potion_choices : [];
+        for (const p of choices) {
+          if (!p || typeof p !== "object") continue;
+          const pr = p as Record<string, unknown>;
+          if (typeof pr.choice === "string" && pr.was_picked) {
+            events.push({ potionName: cleanPotionName(pr.choice as string), action: "picked" });
+          }
+        }
+
+        // Discarded
+        const discarded = Array.isArray(psr.potion_discarded) ? psr.potion_discarded : [];
+        for (const p of discarded) {
+          const name = typeof p === "string" ? p : "";
+          if (name) events.push({ potionName: cleanPotionName(name), action: "discarded" });
+        }
+      }
+    }
+  }
+
+  return events;
+}
+
+function findKilledByType(data: Record<string, unknown>, killedByEncounter: string): string | null {
+  const mph = data.map_point_history;
+  if (!Array.isArray(mph)) return null;
+
+  for (const act of mph) {
+    if (!Array.isArray(act)) continue;
+    for (const entry of act) {
+      if (!entry || typeof entry !== "object") continue;
+      const e = entry as Record<string, unknown>;
+      const rooms = Array.isArray(e.rooms) ? e.rooms : [];
+      for (const room of rooms) {
+        if (!room || typeof room !== "object") continue;
+        const r = room as Record<string, unknown>;
+        if (r.model_id === killedByEncounter) {
+          return typeof e.map_point_type === "string" ? (e.map_point_type as string) : null;
+        }
+      }
+    }
+  }
+  return null;
+}
+
+function findDiedInAct(data: Record<string, unknown>): string | null {
+  if (data.win) return null;
+  const mph = data.map_point_history;
+  const acts = data.acts;
+  if (!Array.isArray(mph) || !Array.isArray(acts)) return null;
+
+  // The last act with floors is where they died
+  let lastActIdx = -1;
+  for (let i = 0; i < mph.length; i++) {
+    if (Array.isArray(mph[i]) && (mph[i] as unknown[]).length > 0) {
+      lastActIdx = i;
+    }
+  }
+
+  if (lastActIdx >= 0 && lastActIdx < acts.length) {
+    return cleanActName(acts[lastActIdx] as string);
+  }
+  return null;
+}
+
 // ─── Main Parser ────────────────────────────────────────────────────
 
 export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
@@ -298,8 +559,7 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
               res({
                 filename: file.name,
                 data: null,
-                error:
-                  err instanceof Error ? err.message : "Invalid JSON",
+                error: err instanceof Error ? err.message : "Invalid JSON",
               });
             }
           };
@@ -318,22 +578,14 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
       let filesSkipped = 0;
 
       for (const { filename, data: rawData, error } of results) {
-        // Parse error
         if (error || !rawData) {
-          parseErrors.push({
-            file: filename,
-            reason: error || "Empty or null data",
-          });
+          parseErrors.push({ file: filename, reason: error || "Empty or null data" });
           filesSkipped++;
           continue;
         }
 
-        // Duplicate detection
         if (seenFiles.has(filename)) {
-          parseErrors.push({
-            file: filename,
-            reason: "Duplicate file — skipped",
-          });
+          parseErrors.push({ file: filename, reason: "Duplicate file — skipped" });
           filesSkipped++;
           continue;
         }
@@ -346,14 +598,9 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
         }
 
         const data = rawData as Record<string, unknown>;
-
-        // Validate structure
         const players = Array.isArray(data.players) ? data.players : [];
         if (players.length === 0) {
-          parseErrors.push({
-            file: filename,
-            reason: "No players array found — not a valid STS2 run file",
-          });
+          parseErrors.push({ file: filename, reason: "No players array found" });
           filesSkipped++;
           continue;
         }
@@ -362,13 +609,29 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
 
         // Core metadata
         const win = Boolean(data.win);
+        const wasAbandoned = Boolean(data.was_abandoned);
+        const startTime = typeof data.start_time === "number" ? data.start_time : 0;
         const character = cleanCharacterName(
           typeof player.character === "string" ? player.character : "",
         );
-        const ascension =
-          typeof data.ascension === "number" ? data.ascension : null;
-        const runTime =
-          typeof data.run_time === "number" ? data.run_time / 60 : 0;
+        const ascension = typeof data.ascension === "number" ? data.ascension : null;
+        const runTime = typeof data.run_time === "number" ? data.run_time / 60 : 0;
+
+        // Killed by
+        const killedByRaw = typeof data.killed_by_encounter === "string"
+          ? data.killed_by_encounter : null;
+        const killedBy = killedByRaw && killedByRaw !== "NONE.NONE"
+          ? cleanEncounterName(killedByRaw)
+          : null;
+        const killedByType = killedByRaw && killedByRaw !== "NONE.NONE"
+          ? findKilledByType(data, killedByRaw)
+          : null;
+
+        // Acts
+        const acts = Array.isArray(data.acts)
+          ? (data.acts as string[]).map(cleanActName)
+          : [];
+        const diedInAct = findDiedInAct(data);
 
         // Relics
         const rawRelics = Array.isArray(player.relics) ? player.relics : [];
@@ -390,13 +653,23 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
         // Final deck
         const finalDeck = extractFinalDeck(data, player);
 
+        // Rest site choices
+        const restSiteChoices = extractRestSiteChoices(data);
+
+        // Ancient/Neow choices
+        const ancientChoices = extractAncientChoices(data);
+
+        // Card operations
+        const cardOperations = extractCardOperations(data);
+
+        // Potion events
+        const potionEvents = extractPotionEvents(data);
+
         // Max floor
         const maxFloorReached =
           floors.length > 0
             ? Math.max(...floors.map((f) => f.floor))
-            : typeof data.floor_reached === "number"
-              ? (data.floor_reached as number)
-              : 0;
+            : 0;
 
         runs.push({
           filename,
@@ -404,6 +677,12 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
           ascension,
           runTime,
           win,
+          wasAbandoned,
+          startTime,
+          killedBy,
+          killedByType,
+          acts,
+          diedInAct,
           relics,
           floors,
           bossesEncountered,
@@ -411,10 +690,16 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
           deckSize: finalDeck.length,
           maxFloorReached,
           cardChoices,
+          restSiteChoices,
+          ancientChoices,
+          cardOperations,
+          potionEvents,
         });
       }
 
-      // Compute aggregate metadata
+      // Sort runs by start time
+      runs.sort((a, b) => a.startTime - b.startTime);
+
       const totalRuns = runs.length;
       const totalWins = runs.filter((r) => r.win).length;
       const overallWinrate = totalRuns > 0 ? totalWins / totalRuns : 0;
