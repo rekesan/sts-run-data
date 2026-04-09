@@ -1,6 +1,6 @@
 # Slay the Spire 2 Insights
 
-This project provides data analysis tools for Slay the Spire (and Slay the Spire 2) run history data.
+This project provides data analysis tools for Slay the Spire 2 run history data.
 
 This project is a fork of [jeremybentham-yt/SlayTheSpire](https://github.com/jeremybentham-yt/SlayTheSpire).
 
