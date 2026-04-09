@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { UploadCloud } from 'lucide-react';
+import { UploadCloud, AlertTriangle, CheckCircle, X } from 'lucide-react';
 import type { AnalysisResult } from './utils/parser';
 import { parseRunDataFiles } from './utils/parser';
 import { Dashboard } from './components/Dashboard';
@@ -9,6 +9,7 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [data, setData] = useState<AnalysisResult | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showErrors, setShowErrors] = useState(true);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleDragOver = (e: React.DragEvent) => {
@@ -25,7 +26,7 @@ function App() {
     if (fileArray.length === 0) return;
     
     setIsLoading(true);
-    // Parse in small chunks or let the parser handle it (runs in browser memory)
+    setShowErrors(true);
     // Add small delay to let UI render loading state
     await new Promise(r => setTimeout(r, 100));
     
@@ -54,12 +55,69 @@ function App() {
     }
   };
 
+  const handleReset = () => {
+    setData(null);
+    setShowErrors(true);
+    // Reset file input so the same files can be re-selected
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   return (
     <div className="app-container">
       <header className="header">
         <h1>Slay the Spire 2 Insights</h1>
         <p>A Web App implementation for your local Slay the Spire Run data analytics</p>
       </header>
+
+      {/* Parse result banner */}
+      {data && showErrors && (data.parseErrors.length > 0 || data.filesSkipped > 0) && (
+        <div className="parse-banner warning">
+          <div className="banner-content">
+            <AlertTriangle size={20} />
+            <div className="banner-text">
+              <strong>
+                {data.filesProcessed} file{data.filesProcessed !== 1 ? 's' : ''} parsed successfully
+                {data.filesSkipped > 0 && (
+                  <>, {data.filesSkipped} skipped</>
+                )}
+              </strong>
+              {data.parseErrors.length > 0 && (
+                <div className="error-list">
+                  {data.parseErrors.slice(0, 5).map((err, i) => (
+                    <span key={i} className="error-item">
+                      {err.file}: {err.reason}
+                    </span>
+                  ))}
+                  {data.parseErrors.length > 5 && (
+                    <span className="error-item">
+                      ...and {data.parseErrors.length - 5} more
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+            <button className="banner-close" onClick={() => setShowErrors(false)}>
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
+
+      {data && data.parseErrors.length === 0 && data.filesProcessed > 0 && showErrors && (
+        <div className="parse-banner success">
+          <div className="banner-content">
+            <CheckCircle size={20} />
+            <span>
+              <strong>{data.filesProcessed} file{data.filesProcessed !== 1 ? 's' : ''}</strong> parsed successfully
+            </span>
+            <button className="banner-close" onClick={() => setShowErrors(false)}>
+              <X size={16} />
+            </button>
+          </div>
+        </div>
+      )}
 
       {!data && (
         <div 
@@ -95,7 +153,7 @@ function App() {
       )}
 
       {data && (
-        <Dashboard data={data} onReset={() => setData(null)} />
+        <Dashboard data={data} onReset={handleReset} />
       )}
     </div>
   );
