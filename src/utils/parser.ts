@@ -138,102 +138,113 @@ function extractCardChoices(
   }
 }
 
+/**
+ * STS2 stores floor data in `map_point_history` — a nested array (one sub-array per act).
+ * Each entry has:
+ *   - map_point_type: "monster" | "elite" | "boss" | "shop" | "rest_site" | "treasure" | "unknown" | "ancient"
+ *   - rooms[]: [{ model_id, monster_ids[], room_type, turns_taken }]
+ *   - player_stats[]: [{ current_hp, damage_taken, max_hp, gold_gained, gold_spent, ... }]
+ */
 function extractFloors(data: Record<string, unknown>): FloorData[] {
   const floors: FloorData[] = [];
+  const mapPointHistory = data.map_point_history;
 
-  // STS2 stores floor data in various structures — try common locations
-  // Try players[0].path or data.path or data.floors
-  const pathSources = [
-    (data.players as Record<string, unknown>[])?.[0]?.path,
-    data.path,
-    data.floors,
-    (data.players as Record<string, unknown>[])?.[0]?.floors,
-  ];
+  if (!Array.isArray(mapPointHistory)) return floors;
 
-  for (const source of pathSources) {
-    if (!Array.isArray(source)) continue;
-    for (const entry of source) {
+  let floorNum = 0;
+  for (const act of mapPointHistory) {
+    if (!Array.isArray(act)) continue;
+    for (const entry of act) {
       if (!entry || typeof entry !== "object") continue;
       const e = entry as Record<string, unknown>;
+      floorNum++;
+
+      const playerStats = Array.isArray(e.player_stats)
+        ? (e.player_stats[0] as Record<string, unknown> | undefined)
+        : undefined;
+
       floors.push({
-        floor: typeof e.floor === "number" ? e.floor : floors.length + 1,
-        type: typeof e.map_point_type === "string"
-          ? e.map_point_type
-          : typeof e.type === "string"
-            ? e.type
-            : "unknown",
-        hpBefore: typeof e.current_hp === "number" ? e.current_hp : undefined,
-        hpAfter: typeof e.hp_after === "number" ? e.hp_after : undefined,
-        goldChange: typeof e.gold_change === "number" ? e.gold_change : undefined,
+        floor: floorNum,
+        type: typeof e.map_point_type === "string" ? e.map_point_type : "unknown",
+        hpBefore: typeof playerStats?.current_hp === "number"
+          ? (playerStats.current_hp as number) + (typeof playerStats?.damage_taken === "number" ? (playerStats.damage_taken as number) : 0)
+          : undefined,
+        hpAfter: typeof playerStats?.current_hp === "number" ? (playerStats.current_hp as number) : undefined,
+        goldChange: playerStats
+          ? ((typeof playerStats.gold_gained === "number" ? (playerStats.gold_gained as number) : 0)
+            - (typeof playerStats.gold_spent === "number" ? (playerStats.gold_spent as number) : 0)
+            - (typeof playerStats.gold_lost === "number" ? (playerStats.gold_lost as number) : 0))
+          : undefined,
       });
     }
-    if (floors.length > 0) break; // Use first source that has data
   }
 
   return floors;
 }
 
-function extractBosses(data: Record<string, unknown>): BossEncounter[] {
+/**
+ * Bosses are floor entries with `map_point_type === "boss"` inside `map_point_history`.
+ * The encounter name lives in `rooms[0].model_id` (e.g. "ENCOUNTER.WATERFALL_GIANT_BOSS").
+ * Monster names are in `rooms[0].monster_ids` (e.g. ["MONSTER.WATERFALL_GIANT"]).
+ * A boss is "defeated" if the player survived (current_hp > 0 after the fight).
+ */
+function extractBosses(data: Record<string, unknown>, runWin: boolean): BossEncounter[] {
   const bosses: BossEncounter[] = [];
+  const mapPointHistory = data.map_point_history;
 
-  // Try various known structures for boss data
-  const bossSource =
-    data.boss_relics ??
-    data.bosses ??
-    (data.players as Record<string, unknown>[])?.[0]?.bosses;
+  if (!Array.isArray(mapPointHistory)) return bosses;
 
-  // Extract from floor/path data — nodes with type boss
-  const pathSources = [
-    (data.players as Record<string, unknown>[])?.[0]?.path,
-    data.path,
-  ];
+  let floorNum = 0;
+  const totalActs = mapPointHistory.length;
 
-  for (const source of pathSources) {
-    if (!Array.isArray(source)) continue;
-    for (const entry of source) {
+  for (let actIdx = 0; actIdx < totalActs; actIdx++) {
+    const act = mapPointHistory[actIdx];
+    if (!Array.isArray(act)) continue;
+
+    for (const entry of act) {
       if (!entry || typeof entry !== "object") continue;
       const e = entry as Record<string, unknown>;
-      if (
-        e.map_point_type === "boss" ||
-        e.type === "boss"
-      ) {
-        const enemyName =
-          typeof e.enemy === "string"
-            ? e.enemy
-            : typeof e.enemies === "string"
-              ? e.enemies
-              : typeof e.name === "string"
-                ? e.name
-                : null;
-        if (enemyName) {
-          bosses.push({
-            name: cleanBossName(enemyName),
-            defeated: Boolean(e.defeated ?? e.won ?? e.victory),
-            floor: typeof e.floor === "number" ? e.floor : undefined,
-          });
-        }
-      }
-    }
-  }
+      floorNum++;
 
-  // Also try explicit boss arrays
-  if (Array.isArray(bossSource)) {
-    for (const b of bossSource) {
-      if (!b || typeof b !== "object") continue;
-      const boss = b as Record<string, unknown>;
-      const name =
-        typeof boss.name === "string"
-          ? boss.name
-          : typeof boss.id === "string"
-            ? boss.id
-            : null;
-      if (name && !bosses.some((existing) => existing.name === cleanBossName(name))) {
-        bosses.push({
-          name: cleanBossName(name),
-          defeated: Boolean(boss.defeated ?? boss.won ?? true),
-          floor: typeof boss.floor === "number" ? boss.floor : undefined,
-        });
+      if (e.map_point_type !== "boss") continue;
+
+      // Get encounter name from rooms
+      const rooms = Array.isArray(e.rooms) ? e.rooms : [];
+      const room = rooms[0] as Record<string, unknown> | undefined;
+
+      let bossName: string;
+      if (room) {
+        // Use monster_ids for the boss name (cleaner than encounter ID)
+        const monsterIds = Array.isArray(room.monster_ids) ? room.monster_ids : [];
+        if (monsterIds.length > 0) {
+          bossName = (monsterIds as string[])
+            .map((id) => cleanBossName(typeof id === "string" ? id : ""))
+            .filter((n) => n.length > 0)
+            .join(" & ");
+        } else {
+          // Fallback to encounter model_id
+          bossName = typeof room.model_id === "string"
+            ? cleanBossName(room.model_id.replace("ENCOUNTER.", "").replace("_BOSS", ""))
+            : "Unknown Boss";
+        }
+      } else {
+        bossName = "Unknown Boss";
       }
+
+      // Determine if defeated: check if player HP > 0 after the fight
+      const playerStats = Array.isArray(e.player_stats)
+        ? (e.player_stats[0] as Record<string, unknown> | undefined)
+        : undefined;
+      const hpAfter = typeof playerStats?.current_hp === "number" ? (playerStats.current_hp as number) : -1;
+
+      // If HP > 0, boss was defeated. If this is the last boss and the run was a win, also defeated.
+      const defeated = hpAfter > 0 || (actIdx === totalActs - 1 && runWin);
+
+      bosses.push({
+        name: bossName,
+        defeated,
+        floor: floorNum,
+      });
     }
   }
 
@@ -374,7 +385,7 @@ export function parseRunDataFiles(files: File[]): Promise<AnalysisResult> {
         const floors = extractFloors(data);
 
         // Bosses
-        const bossesEncountered = extractBosses(data);
+        const bossesEncountered = extractBosses(data, win);
 
         // Final deck
         const finalDeck = extractFinalDeck(data, player);
